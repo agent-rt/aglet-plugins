@@ -1,0 +1,40 @@
+{
+  "manifest": {
+    "id": "barcode",
+    "name": "Barcode",
+    "version": "1.0.0",
+    "runtime": "json-ui-react",
+    "plugin": true,
+    "namespace": "barcode",
+    "actions": [
+      {
+        "name": "encode",
+        "params": [
+          {"key": "text",   "type": "string"},
+          {"key": "format", "type": "string"},
+          {"key": "ecc",    "type": "integer"},
+          {"key": "margin", "type": "integer"},
+          {"key": "width",  "type": "integer"},
+          {"key": "height", "type": "integer"}
+        ],
+        "result": [{"key": "dataUrl", "type": "string"}],
+        "permission": "barcode:encode"
+      },
+      {
+        "name": "decode",
+        "params": [
+          {"key": "width",      "type": "integer"},
+          {"key": "height",     "type": "integer"},
+          {"key": "pixels_b64", "type": "string"}
+        ],
+        "result": [
+          {"key": "text",   "type": "string"},
+          {"key": "format", "type": "string"}
+        ],
+        "permission": "barcode:decode"
+      }
+    ],
+    "backend": {"kind": "wasm", "path": "dist/barcode.wasm"}
+  },
+  "ui": {"type": "Page"}
+}

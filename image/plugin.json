@@ -1,0 +1,70 @@
+{
+  "manifest": {
+    "id": "image",
+    "name": "Image",
+    "version": "2.0.0",
+    "runtime": "json-ui-react",
+    "plugin": true,
+    "namespace": "image",
+    "actions": [
+      {
+        "name": "metadata",
+        "params": [{"key": "input_b64", "type": "string"}],
+        "result": [
+          {"key": "width",    "type": "integer"},
+          {"key": "height",   "type": "integer"},
+          {"key": "channels", "type": "integer"},
+          {"key": "format",   "type": "string"}
+        ],
+        "permission": "image:read"
+      },
+      {
+        "name": "decode",
+        "params": [{"key": "input_b64", "type": "string"}],
+        "result": [
+          {"key": "pixels_b64", "type": "string"},
+          {"key": "width",      "type": "integer"},
+          {"key": "height",     "type": "integer"},
+          {"key": "channels",   "type": "integer"},
+          {"key": "src_format", "type": "string"}
+        ],
+        "permission": "image:read"
+      },
+      {
+        "name": "encode",
+        "params": [
+          {"key": "pixels_b64", "type": "string"},
+          {"key": "width",      "type": "integer"},
+          {"key": "height",     "type": "integer"},
+          {"key": "format",     "type": "string"},
+          {"key": "quality",    "type": "integer"},
+          {"key": "lossless",   "type": "boolean"}
+        ],
+        "result": [
+          {"key": "output_b64", "type": "string"},
+          {"key": "format",     "type": "string"}
+        ],
+        "permission": "image:convert"
+      },
+      {
+        "name": "process",
+        "params": [
+          {"key": "input_b64",     "type": "string"},
+          {"key": "ops",           "type": "array"},
+          {"key": "output_format", "type": "string"},
+          {"key": "quality",       "type": "integer"},
+          {"key": "lossless",      "type": "boolean"}
+        ],
+        "result": [
+          {"key": "output_b64", "type": "string"},
+          {"key": "width",      "type": "integer"},
+          {"key": "height",     "type": "integer"},
+          {"key": "format",     "type": "string"}
+        ],
+        "permission": "image:convert"
+      }
+    ],
+    "backend": {"kind": "wasm", "path": "dist/image.wasm"}
+  },
+  "ui": {"type": "Page"}
+}
