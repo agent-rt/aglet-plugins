@@ -58,6 +58,7 @@ git push --tags
 |---|---|---|---|
 | `barcode` | barcode | encode, decode | [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) |
 | `image` | image | metadata, decode, encode, process | [libwebp](https://github.com/webmproject/libwebp) + [stb](https://github.com/nothings/stb) |
+| `archive` | archive | list, extract, create | [libarchive](https://github.com/libarchive/libarchive) |
 
 ## License
 

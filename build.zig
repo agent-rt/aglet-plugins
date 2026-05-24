@@ -18,9 +18,11 @@ pub fn build(b: *std.Build) void {
 
     const zxing = b.dependency("zxing_cpp", .{}).path("");
     const webp = b.dependency("libwebp", .{}).path("");
+    const archive_dep = b.dependency("libarchive", .{}).path("");
 
     all.dependOn(addPlugin(b, .{ .id = "barcode", .dep_env = "ZXING_CPP_ROOT", .dep_path = zxing }));
     all.dependOn(addPlugin(b, .{ .id = "image", .dep_env = "LIBWEBP_ROOT", .dep_path = webp }));
+    all.dependOn(addPlugin(b, .{ .id = "archive", .dep_env = "LIBARCHIVE_ROOT", .dep_path = archive_dep }));
 }
 
 const PluginSpec = struct {

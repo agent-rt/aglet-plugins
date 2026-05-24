@@ -1,0 +1,53 @@
+{
+  "manifest": {
+    "id": "archive",
+    "name": "Archive",
+    "version": "0.1.0",
+    "runtime": "json-ui-react",
+    "plugin": true,
+    "namespace": "archive",
+    "description": {
+      "default": "Read zip / tar / tar.gz / tar.bz2 / rar (4 & 5). Write zip / tar / tar.gz.",
+      "zh": "读取 zip / tar / tar.gz / tar.bz2 / rar；写 zip / tar / tar.gz。",
+      "ja": "zip / tar / tar.gz / tar.bz2 / rar の読み込み。zip / tar / tar.gz の書き込み。"
+    },
+    "keywords": ["archive", "zip", "tar", "rar", "compression"],
+    "license": "MIT",
+    "homepage": "https://github.com/agent-rt/aglet-plugins",
+    "actions": [
+      {
+        "name": "list",
+        "params": [
+          { "key": "bytes", "type": "bytes" }
+        ],
+        "result": [
+          { "key": "entries", "type": "array" }
+        ],
+        "permission": "archive:read"
+      },
+      {
+        "name": "extract",
+        "params": [
+          { "key": "bytes", "type": "bytes" },
+          { "key": "path", "type": "string" }
+        ],
+        "result": [
+          { "key": "bytes", "type": "bytes" }
+        ],
+        "permission": "archive:read"
+      },
+      {
+        "name": "create",
+        "params": [
+          { "key": "format", "type": "string" },
+          { "key": "entries", "type": "array" }
+        ],
+        "result": [
+          { "key": "bytes", "type": "bytes" }
+        ],
+        "permission": "archive:write"
+      }
+    ],
+    "backend": { "kind": "wasm", "path": "dist/archive.wasm" }
+  }
+}
