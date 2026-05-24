@@ -1,14 +1,13 @@
 //! Build entry for community wasm plugins.
 //!
 //!   zig build           # build everything
-//!   zig build barcode   # only barcode/dist/barcode.wasm
-//!   zig build image     # only image/dist/image.wasm
+//!   zig build barcode   # one plugin
 //!
-//! Deps (zxing-cpp, libwebp) are declared in build.zig.zon and fetched by
-//! `zig fetch` automatically. Each plugin still uses cmake + emscripten
-//! internally (zxing-cpp throws, image uses libwebp's CMake config).
+//! Most plugins keep CMakeLists.txt + emscripten (zxing-cpp throws,
+//! libwebp/libarchive have nontrivial CMake configs). The `crypto` plugin
+//! is pure zig wasm32-wasi using std.crypto — no emscripten.
 //!
-//! Requires emscripten in PATH (emcc / emcmake).
+//! CMake-style plugins require emcc / emcmake in PATH.
 
 const std = @import("std");
 
@@ -16,22 +15,26 @@ pub fn build(b: *std.Build) void {
     const all = b.step("all", "Build every plugin");
     b.default_step.dependOn(all);
 
+    // ── CMake + emscripten plugins ─────────────────────────────────────────
     const zxing = b.dependency("zxing_cpp", .{}).path("");
     const webp = b.dependency("libwebp", .{}).path("");
     const archive_dep = b.dependency("libarchive", .{}).path("");
 
-    all.dependOn(addPlugin(b, .{ .id = "barcode", .dep_env = "ZXING_CPP_ROOT", .dep_path = zxing }));
-    all.dependOn(addPlugin(b, .{ .id = "image", .dep_env = "LIBWEBP_ROOT", .dep_path = webp }));
-    all.dependOn(addPlugin(b, .{ .id = "archive", .dep_env = "LIBARCHIVE_ROOT", .dep_path = archive_dep }));
+    all.dependOn(addCmakePlugin(b, .{ .id = "barcode", .dep_env = "ZXING_CPP_ROOT", .dep_path = zxing }));
+    all.dependOn(addCmakePlugin(b, .{ .id = "image", .dep_env = "LIBWEBP_ROOT", .dep_path = webp }));
+    all.dependOn(addCmakePlugin(b, .{ .id = "archive", .dep_env = "LIBARCHIVE_ROOT", .dep_path = archive_dep }));
+
+    // ── Pure-zig plugins (wasm32-wasi via std.crypto / stdlib) ─────────────
+    all.dependOn(addZigPlugin(b, "crypto"));
 }
 
-const PluginSpec = struct {
+const CmakeSpec = struct {
     id: []const u8,
     dep_env: []const u8,
     dep_path: std.Build.LazyPath,
 };
 
-fn addPlugin(b: *std.Build, spec: PluginSpec) *std.Build.Step {
+fn addCmakePlugin(b: *std.Build, spec: CmakeSpec) *std.Build.Step {
     const dist_rel = b.fmt("{s}/dist", .{spec.id});
     const cache_rel = b.fmt("{s}/build", .{spec.id});
 
@@ -61,5 +64,31 @@ fn addPlugin(b: *std.Build, spec: PluginSpec) *std.Build.Step {
 
     const step = b.step(spec.id, b.fmt("Build {s}/dist/{s}.wasm", .{ spec.id, spec.id }));
     step.dependOn(&stage.step);
+    return step;
+}
+
+fn addZigPlugin(b: *std.Build, id: []const u8) *std.Build.Step {
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .wasi,
+    });
+    const mod = b.createModule(.{
+        .root_source_file = b.path(b.fmt("{s}/src/wrapper.zig", .{id})),
+        .target = wasm_target,
+        .optimize = .ReleaseSmall,
+    });
+    const exe = b.addExecutable(.{
+        .name = id,
+        .root_module = mod,
+    });
+    exe.entry = .disabled;
+    exe.rdynamic = true;
+
+    const install = b.addInstallArtifact(exe, .{
+        .dest_dir = .{ .override = .{ .custom = b.fmt("../{s}/dist", .{id}) } },
+    });
+
+    const step = b.step(id, b.fmt("Build {s}/dist/{s}.wasm", .{ id, id }));
+    step.dependOn(&install.step);
     return step;
 }

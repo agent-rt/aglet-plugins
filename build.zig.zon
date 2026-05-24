@@ -23,6 +23,7 @@
         "barcode",
         "image",
         "archive",
+        "crypto",
         "README.md",
         "LICENSE",
     },
