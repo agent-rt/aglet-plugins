@@ -34,11 +34,13 @@ to `env.emscripten_notify_memory_growth` and three WASI stubs
 ## Build
 
 ```sh
-./scripts/fetch-deps.sh        # vendors zxing-cpp / libwebp
-cd <id> && ./build.sh          # → dist/<id>.wasm
+zig build              # all plugins
+zig build barcode      # one
 ```
 
-Requires [emscripten](https://emscripten.org).
+Deps (zxing-cpp, libwebp) are declared in `build.zig.zon` and fetched
+automatically. Requires zig 0.16+ and [emscripten](https://emscripten.org)
+(`brew install emscripten`).
 
 ## Publish
 

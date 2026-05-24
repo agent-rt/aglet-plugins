@@ -3,12 +3,12 @@ name: Validate
 on:
   pull_request:
     paths:
-      - "**/build.sh"
-      - "**/src/**"
+      - "**/*.cpp"
+      - "**/*.h"
       - "**/CMakeLists.txt"
       - "**/plugin.json"
-      - "**/plugin.zig"
-      - "scripts/**"
+      - "build.zig"
+      - "build.zig.zon"
       - ".github/workflows/validate.yml"
   push:
     branches: [main]
@@ -23,60 +23,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect changed plugins
-        id: changes
-        run: |
-          set -e
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-            head="${{ github.event.pull_request.head.sha }}"
-          else
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
-          fi
-          if [ "$base" = "0000000000000000000000000000000000000000" ] || [ -z "$base" ]; then
-            plugins=$(ls -d */ 2>/dev/null | sed 's|/$||' \
-              | grep -vE '^(scripts|vendor|\.github)$' || true)
-          else
-            plugins=$(git diff --name-only "$base" "$head" \
-              | awk -F/ 'NF>=2 && $1!="scripts" && $1!=".github" && $1!="vendor" { print $1 }' \
-              | sort -u)
-          fi
-          if [ -z "$plugins" ]; then
-            echo "plugins=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "plugins<<EOF" >> "$GITHUB_OUTPUT"
-          printf '%s\n' $plugins >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
 
       - name: Install emscripten
-        if: steps.changes.outputs.plugins != ''
         run: brew install emscripten
 
-      - name: Fetch deps
-        if: steps.changes.outputs.plugins != ''
-        run: ./scripts/fetch-deps.sh
-
       - name: Build
-        if: steps.changes.outputs.plugins != ''
-        env:
-          PLUGINS: ${{ steps.changes.outputs.plugins }}
-        run: |
-          set -euo pipefail
-          fail=0
-          for id in $PLUGINS; do
-            echo "::group::$id"
-            [ -x "$id/build.sh" ] || { echo "::endgroup::"; continue; }
-            ( cd "$id" && ./build.sh ) || { fail=1; echo "✗ $id build failed"; }
-            wasm="$id/dist/$id.wasm"
-            [ -s "$wasm" ] || { echo "✗ $wasm missing or empty"; fail=1; }
-            echo "::endgroup::"
-          done
-          exit $fail
+        run: zig build
 
       - name: Upload wasm
-        if: steps.changes.outputs.plugins != '' && success()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: wasm-${{ github.sha }}
