@@ -146,6 +146,12 @@ fn doHash(a: std.mem.Allocator, params: []const u8) ![]const u8 {
     const data_b64 = getStr(p.value, "data_b64") orelse "";
     const data = try decodeB64(a, data_b64);
 
+    if (std.mem.eql(u8, algo, "sha1")) {
+        // SHA-1: legacy only (TOTP / Git / etc). Not for new applications.
+        var out: [crypto.hash.Sha1.digest_length]u8 = undefined;
+        crypto.hash.Sha1.hash(data, &out, .{});
+        return okOne(a, "digest_b64", try encodeB64(a, &out));
+    }
     if (std.mem.eql(u8, algo, "sha256")) {
         var out: [crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
         crypto.hash.sha2.Sha256.hash(data, &out, .{});
@@ -161,7 +167,7 @@ fn doHash(a: std.mem.Allocator, params: []const u8) ![]const u8 {
         crypto.hash.blake2.Blake2b256.hash(data, &out, .{});
         return okOne(a, "digest_b64", try encodeB64(a, &out));
     }
-    return errInvalid(a, "algo must be sha256 / sha512 / blake2b");
+    return errInvalid(a, "algo must be sha1 / sha256 / sha512 / blake2b");
 }
 
 fn doHmac(a: std.mem.Allocator, params: []const u8) ![]const u8 {
@@ -171,6 +177,13 @@ fn doHmac(a: std.mem.Allocator, params: []const u8) ![]const u8 {
     const key = try decodeB64(a, getStr(p.value, "key_b64") orelse "");
     const data = try decodeB64(a, getStr(p.value, "data_b64") orelse "");
 
+    if (std.mem.eql(u8, algo, "sha1")) {
+        // HMAC-SHA1: required for TOTP RFC 6238 compat with Google Authenticator.
+        const H = crypto.auth.hmac.HmacSha1;
+        var out: [H.mac_length]u8 = undefined;
+        H.create(&out, data, key);
+        return okOne(a, "mac_b64", try encodeB64(a, &out));
+    }
     if (std.mem.eql(u8, algo, "sha256")) {
         const H = crypto.auth.hmac.sha2.HmacSha256;
         var out: [H.mac_length]u8 = undefined;
@@ -183,7 +196,7 @@ fn doHmac(a: std.mem.Allocator, params: []const u8) ![]const u8 {
         H.create(&out, data, key);
         return okOne(a, "mac_b64", try encodeB64(a, &out));
     }
-    return errInvalid(a, "algo must be sha256 / sha512");
+    return errInvalid(a, "algo must be sha1 / sha256 / sha512");
 }
 
 fn doKdf(a: std.mem.Allocator, params: []const u8) ![]const u8 {
