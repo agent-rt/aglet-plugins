@@ -1,81 +1,62 @@
 # aglet-plugins
 
-Community wasm plugin sources for [Aglet](https://github.com/agent-rt/aglet).
-Each plugin is a pure-compute capability that aglets can declare in
-`manifest.requires[]`. Built via emscripten, sandboxed via wasmtime in the
-host runtime.
+Community wasm plugins for [Aglet](https://github.com/agent-rt/aglet). A
+plugin is a pure-compute capability exposed to aglets via
+`manifest.requires[]`. Built with emscripten, sandboxed with wasmtime.
 
-CI/CD auto-publishes merged plugins to
-[aglet-registry](https://github.com/agent-rt/aglet-registry) under
-`plugins/<id>/<version>.aplugin`. Users never install plugins directly —
-they install aglets, and dependencies are resolved automatically.
+Published to [aglet-registry](https://github.com/agent-rt/aglet-registry)
+under `plugins/<id>/<version>.aplugin`. End users install aglets, not
+plugins — dependencies are resolved automatically.
 
 ## Layout
 
 ```
-aglet-plugins/
-  <plugin-id>/
-    plugin.json          # manifest (manifest.plugin: true + namespace + actions[])
-    plugin.zig           # data carrier (@embedFile manifest + wasm; used by aglet host for bundled override)
-    src/wrapper.cpp      # C/C++ source — exports alloc/free/dispatch/memory
-    CMakeLists.txt       # emscripten build config
-    build.sh             # one-shot: emcmake + emmake → dist/<id>.wasm
-    dist/<id>.wasm       # built artifact (committed; CI rebuilds on PR)
-    README.md            # plugin-specific docs
-    LICENSE              # SPDX
+<id>/
+  plugin.json          # manifest
+  src/wrapper.cpp      # source
+  CMakeLists.txt       # emscripten build config
+  build.sh             # → dist/<id>.wasm
 ```
+
+`dist/*.wasm` is gitignored; rebuild via `./<id>/build.sh`.
 
 ## Plugin format
 
-See [aglet-registry/PLUGINS.md](https://github.com/agent-rt/aglet-registry/blob/main/PLUGINS.md)
-for the canonical wasm ABI + meta.json schema.
+See
+[PLUGINS.md](https://github.com/agent-rt/aglet-registry/blob/main/PLUGINS.md)
+for the wasm ABI and `meta.json` schema.
 
-Wasm exports required:
-- `alloc(n: i32) -> i32`
-- `free(ptr: i32, n: i32) -> void`
-- `dispatch(ap, al, pp, pl) -> i64` (packed `(result_ptr << 32) | result_len`)
-- `memory` (WebAssembly.Memory)
+Required exports: `alloc`, `free`, `dispatch`, `memory`. Imports limited
+to `env.emscripten_notify_memory_growth` and three WASI stubs
+(`fd_close`, `fd_write`, `fd_seek`). Anything else needs review — see
+[REVIEW_PROCESS.md Step 6](https://github.com/agent-rt/aglet-registry/blob/main/REVIEW_PROCESS.md).
 
-Imports whitelist (host stubs these):
-- `env.emscripten_notify_memory_growth`
-- `wasi_snapshot_preview1.{fd_close, fd_write, fd_seek}`
-
-**Any other import triggers PR rejection** —
-see [REVIEW_PROCESS.md Step 6](https://github.com/agent-rt/aglet-registry/blob/main/REVIEW_PROCESS.md).
-
-## Dev setup
-
-Build needs emscripten + libwebp / zxing-cpp / etc as wasm-side deps. Dev
-flow uses the aglet repo's `zig-pkg/` (already fetched via `just build-zig`)
-as sibling checkout:
+## Build
 
 ```sh
-git clone https://github.com/agent-rt/aglet
-cd aglet && just build-zig    # fetches deps to ./zig-pkg/
-cd ../aglet-plugins/<id> && ./build.sh
+./scripts/fetch-deps.sh        # vendors zxing-cpp / libwebp
+cd <id> && ./build.sh          # → dist/<id>.wasm
 ```
 
-Override via `$AGLET_DEPS_DIR=/path/to/zig-pkg` if you don't have an aglet
-checkout sibling.
+Requires [emscripten](https://emscripten.org).
 
-CI doesn't have a sibling aglet repo; it'll use `vendor/zig-pkg/` populated
-by `scripts/fetch-deps.sh` (TODO Phase B).
+## Publish
 
-## Publishing
+Tag `<id>-v<version>` and push; CI rebuilds and opens a PR to
+aglet-registry.
 
-`aglet plugin publish <plugin-id>/plugin.json` opens a PR to aglet-registry.
-CI runs this automatically on merge to main.
+```sh
+git tag barcode-v0.2.0
+git push --tags
+```
 
-## Current plugins
+## Plugins
 
-| id | version | namespace | actions |
+| id | namespace | actions | upstream |
 |---|---|---|---|
-| `barcode` | 1.0.0 | barcode | encode / decode (zxing-cpp v3.0.2) |
-| `image` | 2.0.0 | image | metadata / decode / encode / process (stb + libwebp) |
+| `barcode` | barcode | encode, decode | [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) |
+| `image` | image | metadata, decode, encode, process | [libwebp](https://github.com/webmproject/libwebp) + [stb](https://github.com/nothings/stb) |
 
-## Contributing
+## License
 
-PRs welcome. See aglet-registry's REVIEW_PROCESS.md Step 6 for the wasm-
-specific checks your PR must pass before being published.
-
-License: MIT (see per-plugin LICENSE).
+MIT.

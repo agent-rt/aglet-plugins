@@ -1,3 +1,6 @@
 */build/
 vendor/
 .DS_Store
+
+# built wasm — rebuild via ./<id>/build.sh
+*/dist/*.wasm
