@@ -1,0 +1,81 @@
+name: Publish
+
+# Trigger: tag push `<plugin>-v<version>` (e.g. barcode-v0.1.0)
+# 流程：fetch deps → build wasm → aglet publish 到 agent-rt/aglet-registry
+# （走 aglet CLI 的 publish 路径：写 plugins/<id>/<ver>.aplugin + meta.json
+# + index.json，开 PR 给 reviewer 审核）。
+#
+# 需要 secret：
+#   - GH_REGISTRY_TOKEN：PAT 有 agent-rt/aglet-registry 写权限 + open PR scope
+
+on:
+  push:
+    tags:
+      - '*-v*'
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: 'Plugin id (e.g. barcode)'
+        required: true
+      version:
+        description: 'Version (e.g. 0.1.0; from plugin.json manifest.version)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to registry
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve plugin + version
+        id: target
+        run: |
+          set -e
+          if [ -n "${{ github.event.inputs.plugin }}" ]; then
+            PLUGIN="${{ github.event.inputs.plugin }}"
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"   # <plugin>-v<version>
+            PLUGIN="${TAG%-v*}"
+            VERSION="${TAG##*-v}"
+          fi
+          if [ ! -d "$PLUGIN" ] || [ ! -f "$PLUGIN/plugin.json" ]; then
+            echo "✗ plugin '$PLUGIN' has no plugin.json"
+            exit 1
+          fi
+          MANIFEST_VER=$(jq -r .manifest.version "$PLUGIN/plugin.json")
+          if [ "$MANIFEST_VER" != "$VERSION" ]; then
+            echo "✗ tag version $VERSION ≠ plugin.json manifest.version $MANIFEST_VER"
+            echo "  bump plugin.json before tagging."
+            exit 1
+          fi
+          echo "plugin=$PLUGIN"   >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install aglet CLI + emscripten
+        run: |
+          brew tap agent-rt/tap
+          brew install agent-rt/tap/aglet emscripten
+          aglet --version
+          emcc --version | head -1
+
+      - name: Fetch deps + build wasm
+        run: |
+          ./scripts/fetch-deps.sh
+          cd "${{ steps.target.outputs.plugin }}" && ./build.sh
+          ls -la dist/
+
+      - name: aglet publish
+        env:
+          GH_TOKEN: ${{ secrets.GH_REGISTRY_TOKEN }}
+        run: |
+          set -e
+          # aglet publish 会 clone aglet-registry、写 plugins/<id>/<ver>.aplugin
+          # + meta.json + index.json，开 PR 到 agent-rt/aglet-registry。
+          # AGLET_REGISTRY_URL 跟默认一致；这里显式说明。
+          export AGLET_REGISTRY_URL="git@github.com:agent-rt/aglet-registry.git"
+          aglet publish "${{ steps.target.outputs.plugin }}/plugin.json"

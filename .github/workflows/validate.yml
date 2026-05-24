@@ -1,0 +1,101 @@
+name: Validate
+
+# Build wasm for any touched plugin on PR / push to main。
+# 不 publish 任何东西，只确保 wasm 可重建。
+
+on:
+  pull_request:
+    paths:
+      - "**/build.sh"
+      - "**/src/**"
+      - "**/CMakeLists.txt"
+      - "**/plugin.json"
+      - "**/plugin.zig"
+      - "scripts/**"
+      - ".github/workflows/validate.yml"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build wasm
+    runs-on: macos-26   # 跟 aglet 0.2.0 runner 对齐；brew emscripten 装得动
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed plugin dirs
+        id: changes
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            # push to main: compare with previous commit
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          if [ "$base" = "0000000000000000000000000000000000000000" ] || [ -z "$base" ]; then
+            # 首次 push or shallow → build 全部
+            plugins=$(ls -d */ 2>/dev/null | sed 's|/$||' \
+              | grep -vE '^(scripts|vendor|\.github)$' || true)
+          else
+            plugins=$(git diff --name-only "$base" "$head" \
+              | awk -F/ 'NF>=2 && $1!="scripts" && $1!=".github" && $1!="vendor" { print $1 }' \
+              | sort -u)
+          fi
+          if [ -z "$plugins" ]; then
+            echo "No plugin dirs touched; skipping build."
+            echo "plugins=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "To build:"
+          printf '  %s\n' $plugins
+          echo "plugins<<EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' $plugins >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Install emscripten
+        if: steps.changes.outputs.plugins != ''
+        run: |
+          brew install emscripten
+          emcc --version | head -1
+
+      - name: Fetch vendored deps
+        if: steps.changes.outputs.plugins != ''
+        run: ./scripts/fetch-deps.sh
+
+      - name: Build each plugin
+        if: steps.changes.outputs.plugins != ''
+        env:
+          PLUGINS: ${{ steps.changes.outputs.plugins }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for id in $PLUGINS; do
+            echo "::group::build $id"
+            if [ ! -d "$id" ] || [ ! -x "$id/build.sh" ]; then
+              echo "(skip) $id has no build.sh"; echo "::endgroup::"; continue
+            fi
+            ( cd "$id" && ./build.sh ) || { fail=1; echo "✗ $id build failed"; }
+            # wasm 应当存在 + 非空
+            wasm="$id/dist/$id.wasm"
+            if [ ! -s "$wasm" ]; then
+              echo "✗ $wasm missing or empty"; fail=1
+            else
+              echo "✓ $id wasm: $(wc -c < "$wasm" | tr -d ' ') bytes"
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: Upload wasm artifacts
+        if: steps.changes.outputs.plugins != '' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-${{ github.sha }}
+          path: "*/dist/*.wasm"
+          retention-days: 14

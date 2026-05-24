@@ -2,7 +2,7 @@
   "manifest": {
     "id": "barcode",
     "name": "Barcode",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "runtime": "json-ui-react",
     "plugin": true,
     "namespace": "barcode",
@@ -10,31 +10,74 @@
       {
         "name": "encode",
         "params": [
-          {"key": "text",   "type": "string"},
-          {"key": "format", "type": "string"},
-          {"key": "ecc",    "type": "integer"},
-          {"key": "margin", "type": "integer"},
-          {"key": "width",  "type": "integer"},
-          {"key": "height", "type": "integer"}
+          {
+            "key": "text",
+            "type": "string"
+          },
+          {
+            "key": "format",
+            "type": "string"
+          },
+          {
+            "key": "ecc",
+            "type": "integer"
+          },
+          {
+            "key": "margin",
+            "type": "integer"
+          },
+          {
+            "key": "width",
+            "type": "integer"
+          },
+          {
+            "key": "height",
+            "type": "integer"
+          }
         ],
-        "result": [{"key": "dataUrl", "type": "string"}],
+        "result": [
+          {
+            "key": "dataUrl",
+            "type": "string"
+          }
+        ],
         "permission": "barcode:encode"
       },
       {
         "name": "decode",
         "params": [
-          {"key": "width",      "type": "integer"},
-          {"key": "height",     "type": "integer"},
-          {"key": "pixels_b64", "type": "string"}
+          {
+            "key": "width",
+            "type": "integer"
+          },
+          {
+            "key": "height",
+            "type": "integer"
+          },
+          {
+            "key": "pixels_b64",
+            "type": "string"
+          }
         ],
         "result": [
-          {"key": "text",   "type": "string"},
-          {"key": "format", "type": "string"}
+          {
+            "key": "text",
+            "type": "string"
+          },
+          {
+            "key": "format",
+            "type": "string"
+          }
         ],
         "permission": "barcode:decode"
       }
     ],
-    "backend": {"kind": "wasm", "path": "dist/barcode.wasm"}
+    "backend": {
+      "kind": "wasm",
+      "path": "dist/barcode.wasm"
+    }
   },
-  "ui": {"type": "Page"}
+  "ui": {
+    "type": "Page"
+  }
 }
