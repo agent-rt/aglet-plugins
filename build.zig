@@ -36,6 +36,11 @@ pub fn build(b: *std.Build) void {
 
     // ── Pure-zig plugins (wasm32-wasi via std.crypto / stdlib) ─────────────
     all.dependOn(addZigPlugin(b, "crypto"));
+
+    // ── Stdio plugins (subprocess + MCP JSON-RPC) ──────────────────────────
+    // Native binary spawned by the host on stdin/stdout. Built for the
+    // host target (no cross-compile to wasm). See aglet docs/STDIO_PLUGIN_SPEC.md.
+    all.dependOn(addStdioNativePlugin(b, "sysmon"));
 }
 
 const CmakeDep = struct {
@@ -120,6 +125,33 @@ fn addZigPlugin(b: *std.Build, id: []const u8) *std.Build.Step {
     });
 
     const step = b.step(id, b.fmt("Build {s}/dist/{s}.wasm", .{ id, id }));
+    step.dependOn(&install.step);
+    return step;
+}
+
+/// Build `<id>/src/main.zig` as a native executable under `<id>/dist/<id>`.
+/// Built for the host target (no cross-compile) — stdio plugins are spawned
+/// as subprocesses by the host runtime, so they run on the user's OS/arch
+/// directly. Links libc so platform-specific syscalls (Mach API on macOS,
+/// /proc reads on Linux) can use extern "c" bindings.
+fn addStdioNativePlugin(b: *std.Build, id: []const u8) *std.Build.Step {
+    const target = b.graph.host;
+    const mod = b.createModule(.{
+        .root_source_file = b.path(b.fmt("{s}/src/main.zig", .{id})),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    mod.link_libc = true;
+    const exe = b.addExecutable(.{
+        .name = id,
+        .root_module = mod,
+    });
+
+    const install = b.addInstallArtifact(exe, .{
+        .dest_dir = .{ .override = .{ .custom = b.fmt("../{s}/dist", .{id}) } },
+    });
+
+    const step = b.step(id, b.fmt("Build {s}/dist/{s} (native stdio plugin)", .{ id, id }));
     step.dependOn(&install.step);
     return step;
 }
