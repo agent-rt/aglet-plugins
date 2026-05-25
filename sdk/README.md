@@ -15,7 +15,7 @@ Helpers for writing **wasm plugins** for the [Aglet](https://aglet.dev) runtime.
 
 **Net**: a typical plugin loses ~100 lines of boilerplate.
 
-## Minimal plugin (Zig wasm32-wasi)
+## Minimal plugin (Zig, wasm32-wasi)
 
 ```zig
 // my-plugin/src/wrapper.zig
@@ -42,8 +42,38 @@ export fn dispatch(ap: u32, al: u32, pp: u32, pl: u32) callconv(.c) u64 {
 }
 ```
 
-That's the entire plugin module. Pair it with a `plugin.json` describing the
-actions (host validates declarations against runtime calls) and you have a
+## Minimal plugin (C++17, emscripten)
+
+```cpp
+// my-plugin/src/wrapper.cpp
+#include <aglet_plugin.h>
+#include <string>
+#include <string_view>
+
+static std::string doEcho(const aglet::Params& p) {
+    auto msg = p.strOr("msg", "(empty)");
+    return aglet::Result::ok().str("echo", msg);
+}
+
+static std::string doAdd(const aglet::Params& p) {
+    int64_t a = p.integer("a", 0);
+    int64_t b = p.integer("b", 0);
+    return aglet::Result::ok().integer("sum", a + b);
+}
+
+std::string aglet_dispatch_action(std::string_view action,
+                                  std::string_view params_json) {
+    aglet::Params p(params_json);
+    if (action == "echo") return doEcho(p);
+    if (action == "add")  return doAdd(p);
+    return aglet::errUnknown(action);
+}
+
+AGLET_PLUGIN_EXPORTS
+```
+
+Pair either source with a `plugin.json` describing the actions (the host
+runtime validates declarations against runtime calls) and you have a
 shipping plugin.
 
 ## Layout
@@ -51,23 +81,40 @@ shipping plugin.
 ```
 sdk/
 ├── README.md              # this file
-└── zig/
-    └── plugin.zig         # SDK module — Params / Result / runDispatch / exportRuntime
+├── zig/
+│   └── plugin.zig         # Zig SDK — Params / Result / runDispatch / exportRuntime
+└── c/
+    ├── aglet_plugin.h     # C++17 header-only SDK — Params / Result / AGLET_PLUGIN_EXPORTS
+    └── CMakeLists.txt     # INTERFACE library aglet_plugin_sdk_c
 ```
 
 Planned additions (not yet implemented):
 
-- `c/` — C/C++ SDK for plugins built via emscripten
 - `templates/` — scaffolding source for an `aglet plugin new <id>` command
 - `plugin.schema.json` — JSON Schema for `plugin.json` (IDE / CI validation)
 
 ## Build integration
 
-The repo-level `build.zig` exposes `addZigPlugin(b, "<id>")`. It auto-wires
-`aglet_plugin_sdk` as a module import, so plugin sources can just write:
+**Zig plugins.** The repo-level `build.zig` exposes `addZigPlugin(b, "<id>")`,
+which auto-wires `aglet_plugin_sdk` as a module import:
 
 ```zig
 const sdk = @import("aglet_plugin_sdk");
+```
+
+**C/C++ plugins (emscripten).** Add the SDK as a subdirectory in the
+plugin's `CMakeLists.txt` and link the INTERFACE target:
+
+```cmake
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../sdk/c
+                 ${CMAKE_BINARY_DIR}/aglet_plugin_sdk_c)
+target_link_libraries(<plugin> aglet_plugin_sdk_c)
+```
+
+Then in source:
+
+```cpp
+#include <aglet_plugin.h>
 ```
 
 ## Scope
