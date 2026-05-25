@@ -21,8 +21,10 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$",
-          "description": "Plugin identifier. Lowercase, must start with a letter, kebab-case only."
+          "minLength": 2,
+          "maxLength": 50,
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Plugin identifier. Lowercase kebab-case, may start with a digit (e.g. 2fa, 2048, 3d-cube). No leading or trailing dash, no consecutive dashes. Note: `namespace` is stricter (must be a valid JS identifier)."
         },
         "name": {
           "$ref": "#/$defs/localized_string",
