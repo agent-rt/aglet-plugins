@@ -74,7 +74,13 @@
     ],
     "backend": {
       "kind": "wasm",
-      "path": "dist/barcode.wasm"
+      "path": "dist/barcode.wasm",
+      "wasi_imports": [
+        "env.emscripten_notify_memory_growth",
+        "wasi_snapshot_preview1.fd_close",
+        "wasi_snapshot_preview1.fd_write",
+        "wasi_snapshot_preview1.fd_seek"
+      ]
     }
   },
   "ui": {

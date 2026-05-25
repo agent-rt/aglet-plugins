@@ -154,7 +154,10 @@
     ],
     "backend": {
       "kind": "wasm",
-      "path": "dist/image.wasm"
+      "path": "dist/image.wasm",
+      "wasi_imports": [
+        "env.emscripten_notify_memory_growth"
+      ]
     }
   },
   "ui": {

@@ -20,7 +20,11 @@
         "permission": "{{namespace}}:read"
       }
     ],
-    "backend": { "kind": "wasm", "path": "dist/{{id}}.wasm" }
+    "backend": {
+      "kind": "wasm",
+      "path": "dist/{{id}}.wasm",
+      "wasi_imports": []
+    }
   },
   "ui": { "type": "Page" }
 }

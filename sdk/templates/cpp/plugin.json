@@ -20,7 +20,13 @@
         "permission": "{{namespace}}:read"
       }
     ],
-    "backend": { "kind": "wasm", "path": "dist/{{id}}.wasm" }
+    "backend": {
+      "kind": "wasm",
+      "path": "dist/{{id}}.wasm",
+      "wasi_imports": [
+        "env.emscripten_notify_memory_growth"
+      ]
+    }
   },
   "ui": { "type": "Page" }
 }
