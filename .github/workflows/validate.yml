@@ -3,6 +3,7 @@ name: Validate
 on:
   pull_request:
     paths:
+      - "**/*.zig"
       - "**/*.cpp"
       - "**/*.h"
       - "**/CMakeLists.txt"

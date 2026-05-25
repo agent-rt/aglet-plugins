@@ -81,17 +81,40 @@ shipping plugin.
 ```
 sdk/
 ├── README.md              # this file
+├── plugin.schema.json     # JSON Schema for plugin.json (draft 2020-12)
 ├── zig/
 │   └── plugin.zig         # Zig SDK — Params / Result / runDispatch / exportRuntime
-└── c/
-    ├── aglet_plugin.h     # C++17 header-only SDK — Params / Result / AGLET_PLUGIN_EXPORTS
-    └── CMakeLists.txt     # INTERFACE library aglet_plugin_sdk_c
+├── c/
+│   ├── aglet_plugin.h     # C++17 header-only SDK — Params / Result / AGLET_PLUGIN_EXPORTS
+│   └── CMakeLists.txt     # INTERFACE library aglet_plugin_sdk_c
+└── templates/             # scaffolding source for new plugins (see templates/README.md)
+    ├── zig/               # Zig wasm32-wasi starter
+    └── cpp/               # C++17 emscripten starter
 ```
 
-Planned additions (not yet implemented):
+## Validating plugin.json
 
-- `templates/` — scaffolding source for an `aglet plugin new <id>` command
-- `plugin.schema.json` — JSON Schema for `plugin.json` (IDE / CI validation)
+`plugin.schema.json` is a JSON Schema (draft 2020-12) covering the canonical
+manifest shape. Editors that understand JSON Schema (VS Code, JetBrains, etc.)
+can pick it up via a `$schema` reference:
+
+```json
+{
+  "$schema": "../sdk/plugin.schema.json",
+  "manifest": { ... }
+}
+```
+
+Or validate from CI:
+
+```bash
+python3 -m pip install jsonschema
+python3 -c "import json,jsonschema; jsonschema.validate(json.load(open('plugin.json')), json.load(open('../sdk/plugin.schema.json')))"
+```
+
+The Aglet runtime applies stricter validation at install time (cross-checking
+permissions, namespace uniqueness, etc.). This schema is the lighter-weight
+check that catches structural mistakes before you build.
 
 ## Build integration
 
