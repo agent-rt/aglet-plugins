@@ -2,7 +2,7 @@
   "manifest": {
     "id": "image",
     "name": "Image",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "runtime": "json-ui-react",
     "plugin": true,
     "namespace": "image",
@@ -154,7 +154,10 @@
     ],
     "backend": {
       "kind": "wasm",
-      "path": "dist/image.wasm"
+      "path": "dist/image.wasm",
+      "wasi_imports": [
+        "env.emscripten_notify_memory_growth"
+      ]
     }
   },
   "ui": {

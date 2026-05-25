@@ -105,7 +105,14 @@
         "permission": "crypto:random"
       }
     ],
-    "backend": { "kind": "wasm", "path": "dist/crypto.wasm" }
+    "backend": {
+      "kind": "wasm",
+      "path": "dist/crypto.wasm",
+      "wasi_imports": [
+        "wasi_snapshot_preview1.random_get",
+        "wasi_snapshot_preview1.clock_time_get"
+      ]
+    }
   },
   "ui": { "type": "Page" }
 }

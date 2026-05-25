@@ -48,7 +48,21 @@
         "permission": "archive:write"
       }
     ],
-    "backend": { "kind": "wasm", "path": "dist/archive.wasm" }
+    "backend": {
+      "kind": "wasm",
+      "path": "dist/archive.wasm",
+      "wasi_imports": [
+        "env.emscripten_notify_memory_growth",
+        "env.__syscall_pipe2",
+        "env.__syscall_poll",
+        "wasi_snapshot_preview1.fd_close",
+        "wasi_snapshot_preview1.fd_write",
+        "wasi_snapshot_preview1.fd_seek",
+        "wasi_snapshot_preview1.fd_read",
+        "wasi_snapshot_preview1.clock_time_get",
+        "wasi_snapshot_preview1.proc_exit"
+      ]
+    }
   },
   "ui": { "type": "Page" }
 }

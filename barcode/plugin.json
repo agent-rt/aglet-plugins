@@ -2,7 +2,7 @@
   "manifest": {
     "id": "barcode",
     "name": "Barcode",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "runtime": "json-ui-react",
     "plugin": true,
     "namespace": "barcode",
@@ -74,7 +74,13 @@
     ],
     "backend": {
       "kind": "wasm",
-      "path": "dist/barcode.wasm"
+      "path": "dist/barcode.wasm",
+      "wasi_imports": [
+        "env.emscripten_notify_memory_growth",
+        "wasi_snapshot_preview1.fd_close",
+        "wasi_snapshot_preview1.fd_write",
+        "wasi_snapshot_preview1.fd_seek"
+      ]
     }
   },
   "ui": {
