@@ -1,7 +1,8 @@
-//! crypto plugin — pure-zig wasm32-wasi using std.crypto。
+//! crypto plugin — pure-zig wasm32-wasi using std.crypto.
 //!
-//! Migrated to aglet_plugin_sdk (#9 plugin SDK): ~150 LOC marshal boilerplate
-//! 收敛到 SDK，本文件只剩 io_inst + csprng + 真正的 crypto 逻辑。
+//! Built on `aglet_plugin_sdk`: the SDK owns the alloc/free/dispatch wasm
+//! exports + JSON marshaling, so this file is just `io_inst` + `csprng` +
+//! the action handlers.
 //!
 //! Actions (JSON in/out, fields are base64 strings):
 //!   hash({algo, data_b64}) → {digest_b64}               algo ∈ sha1|sha256|sha512|blake2b
@@ -20,13 +21,15 @@ const sdk = @import("aglet_plugin_sdk");
 
 // ─── plugin-local: io + CSPRNG ──────────────────────────────────────────────
 
-/// Single-threaded std.Io —— argon2 KDF / Ed25519 keygen 要 std.Io 参数。
+/// Single-threaded std.Io. argon2 KDF and Ed25519 keygen both require a
+/// std.Io argument; wasm has no threads so single-threaded is sufficient.
 var io_inst: std.Io.Threaded = .init_single_threaded;
 fn io() std.Io {
     return io_inst.io();
 }
 
-/// WASI CSPRNG。host 在 sandbox 内把 `random_get` 接到 OS getrandom。
+/// WASI CSPRNG. The host runtime maps `random_get` to the OS RNG
+/// (getrandom on Linux, SecRandomCopyBytes on Apple, etc.) inside its sandbox.
 fn csprng(buf: []u8) void {
     _ = std.os.wasi.random_get(buf.ptr, buf.len);
 }

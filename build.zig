@@ -72,8 +72,9 @@ fn addZigPlugin(b: *std.Build, id: []const u8) *std.Build.Step {
         .cpu_arch = .wasm32,
         .os_tag = .wasi,
     });
-    // SDK module —— 跨所有 Zig wasm plugin 共用。每个 plugin 通过
-    // `@import("aglet_plugin_sdk")` 拿 helpers + dispatch runner，省手写 marshal。
+    // SDK module — shared across all Zig wasm plugins in this repo. Each
+    // plugin imports it as `@import("aglet_plugin_sdk")` for the marshaling
+    // helpers + dispatch runner.
     const sdk_mod = b.createModule(.{
         .root_source_file = b.path("sdk/zig/plugin.zig"),
         .target = wasm_target,

@@ -1,7 +1,8 @@
 //! Aglet plugin SDK — wasm32-wasi.
 //!
-//! Drop the ~100 lines of marshaling boilerplate every wasm plugin used to
-//! hand-roll. Plugin author writes:
+//! Removes the marshaling boilerplate (alloc/free/dispatch exports, JSON
+//! parsing, base64 encoding, error envelopes) shared by every wasm plugin.
+//! A complete plugin looks like:
 //!
 //!     const sdk = @import("aglet_plugin_sdk");
 //!
@@ -17,19 +18,20 @@
 //!     }
 //!
 //! ABI contract (host ↔ plugin):
-//!   - Plugin exports `alloc(len) → ptr`, `free(ptr, len)`, `dispatch(...)`.
-//!   - Host calls dispatch with (action_ptr, action_len, params_ptr, params_len)
-//!     all referring to wasm linear-memory; returns packed (ptr<<32 | len)
-//!     pointing to a host-readable result buffer the host then `free`s.
-//!   - Result is JSON `{ok:true, ...}` or `{ok:false, error:{code, message}}`.
-//!     Binary data goes through `<key>_b64` standard-base64 strings.
+//!   - The plugin exports `alloc(len) -> ptr`, `free(ptr, len)`, and
+//!     `dispatch(action_ptr, action_len, params_ptr, params_len) -> u64`.
+//!   - `dispatch` returns a packed `(ptr << 32) | len` referring to a buffer
+//!     in the plugin's linear memory; the host reads it and then calls `free`.
+//!   - The buffer contents are JSON: either `{"ok":true, ...}` or
+//!     `{"ok":false, "error":{"code","message"}}`. Binary payloads are
+//!     standard-base64 strings under `<key>_b64` field names.
 
 const std = @import("std");
 
 // ─── allocator + runtime exports ──────────────────────────────────────────
 //
-// One global page allocator for host-visible buffers. wasm has no threads
-// so single-threaded is fine.
+// Single global page allocator for host-visible buffers. wasm has no threads,
+// so single-threaded allocation is sufficient.
 
 pub const allocator = std.heap.wasm_allocator;
 
@@ -113,8 +115,9 @@ pub fn parseParams(arena: std.mem.Allocator, json: []const u8) !Params {
 
 // ─── Result builders ──────────────────────────────────────────────────────
 //
-// Each returns arena-owned JSON. Wrap binary data as base64 strings under
-// `<key>_b64` keys — host runtime convention.
+// All builders allocate from the supplied arena. By convention, binary
+// payloads in the JSON result are standard-base64 strings under `<key>_b64`
+// field names; the host runtime expects this for any byte slice.
 
 pub fn okBytes(arena: std.mem.Allocator, key: []const u8, raw: []const u8) ![]const u8 {
     const b64 = try encodeB64(arena, raw);

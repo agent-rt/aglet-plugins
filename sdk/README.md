@@ -46,35 +46,38 @@ That's the entire plugin module. Pair it with a `plugin.json` describing the
 actions (host validates declarations against runtime calls) and you have a
 shipping plugin.
 
-## What's in this directory
+## Layout
 
 ```
 sdk/
 ├── README.md              # this file
-├── plugin.schema.json     # JSON Schema for plugin.json (IDE / CI validation)
-├── zig/
-│   ├── plugin.zig         # SDK module — Params / Result / runDispatch / exportRuntime
-│   └── build.zig.zon      # Zig package metadata (Aglet plugins import via b.dependency)
-├── c/                     # (TODO) C/C++ SDK for emscripten plugins
-└── templates/             # (TODO) `aglet plugin new <id>` scaffolding source
+└── zig/
+    └── plugin.zig         # SDK module — Params / Result / runDispatch / exportRuntime
 ```
+
+Planned additions (not yet implemented):
+
+- `c/` — C/C++ SDK for plugins built via emscripten
+- `templates/` — scaffolding source for an `aglet plugin new <id>` command
+- `plugin.schema.json` — JSON Schema for `plugin.json` (IDE / CI validation)
 
 ## Build integration
 
 The repo-level `build.zig` exposes `addZigPlugin(b, "<id>")`. It auto-wires
-`aglet_plugin_sdk` as an import. Inside plugin source:
+`aglet_plugin_sdk` as a module import, so plugin sources can just write:
 
 ```zig
 const sdk = @import("aglet_plugin_sdk");
 ```
 
-## Static plugins
+## Scope
 
-Sandboxed wasm is the right shape for community plugins. If you need OS
-APIs (clipboard / filesystem / camera / etc), you're writing a **static
-plugin** which lives in the closed-source Aglet runtime repo. Those still
-follow the same `plugin.json` schema but link against the runtime directly.
-The SDK here is wasm-only.
+This SDK is for **sandboxed wasm plugins**, which are the right shape for
+community contributions: pure computation, no host APIs. Plugins that need
+direct OS access (clipboard, filesystem, camera, system info, etc.) are
+shipped as static plugins inside the Aglet runtime itself. They use the
+same `plugin.json` schema but link against the runtime directly, so this
+SDK does not apply to them.
 
 ## License
 
