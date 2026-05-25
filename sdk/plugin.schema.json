@@ -112,12 +112,12 @@
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "enum": ["wasm"],
-          "description": "Community plugins always ship as wasm. Static plugins (sysinfo / clipboard etc.) live in the Aglet runtime repo and use `kind: \"static\"` there; that variant is not allowed here."
+          "enum": ["wasm", "stdio"],
+          "description": "Plugin backend. `wasm` = sandboxed wasmtime instance + WASI imports allowlist (the common case for community plugins). `stdio` = subprocess speaking MCP-flavored JSON-RPC; runs with the user's full OS privileges narrowed by `capabilities[]` (see docs/STDIO_PLUGIN_SPEC.md). Static plugins live in the runtime repo and use `kind: \"static\"` there; that variant is not allowed in community plugins."
         },
         "path": {
           "type": "string",
-          "description": "Path to the compiled `.wasm`, relative to plugin.json. By convention `dist/<id>.wasm`."
+          "description": "For `wasm` backends: path to the compiled `.wasm`, relative to plugin.json. By convention `dist/<id>.wasm`. For `stdio` backends: path to the executable, by convention `dist/<id>` (per OS/arch under `dist/<id>-<os>-<arch>` once multi-arch packaging lands)."
         },
         "wasi_imports": {
           "type": "array",
@@ -137,9 +137,39 @@
             ]
           },
           "uniqueItems": true,
-          "description": "Allowlist of WASI / emscripten host stubs this plugin imports. Each entry is a fully-qualified `<module>.<name>` from the host's STUB_TABLE — the review process gates additions. When this field is omitted the host links every known stub (legacy back-compat). New plugins should declare exactly what they need so unintended imports (e.g. an upstream lib smuggling `fd_write` for debug prints) fail loud at instantiate rather than dissolving into a silent no-op."
+          "description": "Wasm backends only: allowlist of WASI / emscripten host stubs the plugin imports. Each entry is a fully-qualified `<module>.<name>` from the host's STUB_TABLE — review process gates additions. New plugins should declare exactly what they need so unintended imports fail loud at instantiate."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "fs:read:any",
+              "fs:write:any",
+              "fs:read:/proc",
+              "fs:read:/sys",
+              "fs:read:/dev",
+              "net:tcp:out",
+              "net:tcp:in",
+              "net:udp",
+              "net:none",
+              "exec:fork",
+              "exec:none",
+              "device:camera",
+              "device:microphone",
+              "device:location"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Stdio backends only: declarative allowlist of OS capabilities the plugin actually uses. Surfaced verbatim to the user in the install dialog (`This plugin needs: read /proc, no network, no exec`). Closed enum — adding capabilities requires a schema PR + REVIEW_PROCESS.md discussion. Wasm plugins ignore this field (their isolation is enforced by the sandbox + wasi_imports). Path-prefixed variants (`fs:read:/proc`) name specific dirs the plugin reads from; wildcard (`fs:read:any`) means the plugin touches arbitrary paths. v1: descriptive only — runtime sandbox enforcement (macOS sandbox-exec / linux bubblewrap) is future work."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "stdio" } } },
+          "then": { "required": ["capabilities"] }
+        }
+      ]
     },
     "localized_string": {
       "oneOf": [
