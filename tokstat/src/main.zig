@@ -750,17 +750,30 @@ fn extractPanelValues(slice: []const u8) PanelValues {
 const CodexProbe = struct {
     ok: bool,
     err: ?[]const u8,
+    /// "http" (chatgpt.com/backend-api/wham/usage) or "jsonl" (~/.codex/sessions rollout).
+    /// "" when ok=false.
+    source: []const u8,
     session_pct: ?u32, // primary (5h window)
     session_resets_ms: ?i64,
     weekly_pct: ?u32, // secondary (7d window)
     weekly_resets_ms: ?i64,
     plan_type: ?[]const u8,
+    /// HTTP-only：has_credits / unlimited / balance（balance 是 number 或 null
+    /// → 这里 stringify 给 UI 直接显示 "—" / "1.2345"）。JSONL 路径都 null。
+    credits_has: ?bool = null,
+    credits_unlimited: ?bool = null,
+    credits_balance: ?[]const u8 = null,
 };
 
+/// Codex usage 探针。优先 HTTP（`chatgpt.com/backend-api/wham/usage`，OAuth
+/// access_token 从 `~/.codex/auth.json`）—— 永远新、不依赖最近有过 codex 调用。
+/// HTTP 失败（401 token 过期 / 网断 / curl 不在）退化到 JSONL rollout 扫描。
 fn probeCodex(arena: std.mem.Allocator) CodexProbe {
-    return probeCodexInner(arena) catch |e| .{
+    if (probeCodexHttp(arena)) |p| return p else |_| {}
+    return probeCodexRollout(arena) catch |e| .{
         .ok = false,
         .err = @errorName(e),
+        .source = "",
         .session_pct = null,
         .session_resets_ms = null,
         .weekly_pct = null,
@@ -769,14 +782,197 @@ fn probeCodex(arena: std.mem.Allocator) CodexProbe {
     };
 }
 
-fn probeCodexInner(arena: std.mem.Allocator) !CodexProbe {
+/// HTTP 路径：curl chatgpt.com/backend-api/wham/usage with Bearer token from
+/// `~/.codex/auth.json`. 比 JSONL 实时（不需要近期跑过 codex turn）+ 额外
+/// 拿 credits / plan_type。token 401 / 网断 / curl 失败 → caller fallback。
+fn probeCodexHttp(arena: std.mem.Allocator) !CodexProbe {
+    const home_cstr = getenv("HOME") orelse return error.NoHome;
+    const home = std.mem.span(home_cstr);
+    const auth_path = try std.fmt.allocPrintSentinel(arena, "{s}/.codex/auth.json", .{home}, 0);
+    const auth_bytes = try readWholeFile(arena, auth_path);
+    var parsed = std.json.parseFromSlice(std.json.Value, arena, auth_bytes, .{}) catch return error.AuthParse;
+    defer parsed.deinit();
+    const root = switch (parsed.value) { .object => |o| o, else => return error.AuthShape };
+    const tokens = switch (root.get("tokens") orelse return error.AuthNoTokens) {
+        .object => |o| o, else => return error.AuthShape,
+    };
+    const access_tok = switch (tokens.get("access_token") orelse return error.AuthNoAccess) {
+        .string => |s| s, else => return error.AuthShape,
+    };
+    const account: ?[]const u8 = blk: {
+        const v = tokens.get("account_id") orelse break :blk null;
+        break :blk switch (v) { .string => |s| s, else => null };
+    };
+
+    // curl 8s 超时；HTTPS 证书走系统 trust store。Bearer + 可选 account header。
+    var args: std.ArrayList([]const u8) = .empty;
+    defer args.deinit(arena);
+    try args.append(arena, "/usr/bin/curl");
+    try args.append(arena, "-sS");
+    try args.append(arena, "--max-time");
+    try args.append(arena, "8");
+    try args.append(arena, "-H");
+    const auth_header = try std.fmt.allocPrint(arena, "Authorization: Bearer {s}", .{access_tok});
+    try args.append(arena, auth_header);
+    if (account) |aid| {
+        try args.append(arena, "-H");
+        try args.append(arena, try std.fmt.allocPrint(arena, "ChatGPT-Account-Id: {s}", .{aid}));
+    }
+    try args.append(arena, "-H");
+    try args.append(arena, "Accept: application/json");
+    try args.append(arena, "-H");
+    try args.append(arena, "User-Agent: tokstat");
+    try args.append(arena, "https://chatgpt.com/backend-api/wham/usage");
+
+    const body = try spawnCaptureStdout(arena, args.items);
+    return try parseWhamUsage(arena, body);
+}
+
+fn readWholeFile(arena: std.mem.Allocator, path_z: [:0]const u8) ![]u8 {
+    const fd = open(path_z.ptr, O_RDONLY);
+    if (fd < 0) return error.OpenFailed;
+    defer _ = close(fd);
+    const sz = lseek(fd, 0, SEEK_END);
+    if (sz <= 0 or sz > 4 * 1024 * 1024) return error.SizeBad;
+    _ = lseek(fd, 0, SEEK_SET);
+    const buf = try arena.alloc(u8, @intCast(sz));
+    var got: usize = 0;
+    while (got < buf.len) {
+        const r = read(fd, buf.ptr + got, buf.len - got);
+        if (r <= 0) break;
+        got += @intCast(r);
+    }
+    return buf[0..got];
+}
+
+/// fork + exec + 收 stdout。pipe(2) + posix_spawn 之类的不在 std；自己用
+/// pipe + fork + dup2 + execvp + read。失败任意一步 → error。child 不出 30s。
+extern "c" fn pipe(fds: *[2]c_int) c_int;
+extern "c" fn dup2(old: c_int, new: c_int) c_int;
+extern "c" fn fork() c_int;
+
+fn spawnCaptureStdout(arena: std.mem.Allocator, argv: []const []const u8) ![]u8 {
+    if (argv.len == 0) return error.NoArgv;
+
+    // argv → [*:0]const u8 array
+    var argv_z = try arena.alloc(?[*:0]const u8, argv.len + 1);
+    for (argv, 0..) |s, i| argv_z[i] = (try arena.dupeZ(u8, s)).ptr;
+    argv_z[argv.len] = null;
+
+    var fds: [2]c_int = .{ -1, -1 };
+    if (pipe(&fds) != 0) return error.PipeFailed;
+    const pid = fork();
+    if (pid < 0) {
+        _ = close(fds[0]);
+        _ = close(fds[1]);
+        return error.ForkFailed;
+    }
+    if (pid == 0) {
+        // child: redirect stdout to pipe write end, drop stdin/stderr
+        _ = dup2(fds[1], stdout_fd);
+        _ = close(fds[0]);
+        _ = close(fds[1]);
+        // stderr → /dev/null（不污染父 stderr 日志）
+        const dev_null_z: [*:0]const u8 = "/dev/null";
+        const null_fd = open(dev_null_z, O_RDONLY);
+        if (null_fd >= 0) {
+            _ = dup2(null_fd, stderr_fd);
+            _ = dup2(null_fd, stdin_fd);
+            _ = close(null_fd);
+        }
+        const ptr: [*:null]const ?[*:0]const u8 = @ptrCast(argv_z.ptr);
+        _ = execvp(@ptrCast(argv_z[0].?), ptr);
+        _exit(127);
+    }
+    _ = close(fds[1]);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(arena);
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = read(fds[0], &buf, buf.len);
+        if (n <= 0) break;
+        try out.appendSlice(arena, buf[0..@intCast(n)]);
+        if (out.items.len > 2 * 1024 * 1024) break; // cap 2MB
+    }
+    _ = close(fds[0]);
+
+    var status: c_int = 0;
+    _ = waitpid(pid, &status, 0);
+
+    return out.toOwnedSlice(arena);
+}
+
+fn parseWhamUsage(arena: std.mem.Allocator, body: []const u8) !CodexProbe {
+    if (body.len == 0) return error.EmptyResponse;
+    // 401 / HTML error page 不是 JSON object 起头 — parse 失败 → caller fallback
+    var parsed = std.json.parseFromSlice(std.json.Value, arena, body, .{}) catch return error.NotJson;
+    defer parsed.deinit();
+    const root = switch (parsed.value) { .object => |o| o, else => return error.JsonShape };
+
+    var plan_dup: ?[]const u8 = null;
+    if (root.get("plan_type")) |v| if (v == .string) {
+        plan_dup = arena.dupe(u8, v.string) catch null;
+    };
+
+    var session_pct: ?u32 = null;
+    var session_resets_ms: ?i64 = null;
+    var weekly_pct: ?u32 = null;
+    var weekly_resets_ms: ?i64 = null;
+
+    const rl_v = root.get("rate_limit") orelse return error.NoRateLimit;
+    if (rl_v != .object) return error.JsonShape;
+    if (rl_v.object.get("primary_window")) |pw| if (pw == .object) {
+        session_pct = readUsedPct(pw.object);
+        session_resets_ms = readResetsMs(pw.object);
+    };
+    if (rl_v.object.get("secondary_window")) |sw| if (sw == .object) {
+        weekly_pct = readUsedPct(sw.object);
+        weekly_resets_ms = readResetsMs(sw.object);
+    };
+
+    var credits_has: ?bool = null;
+    var credits_unlimited: ?bool = null;
+    var credits_balance: ?[]const u8 = null;
+    if (root.get("credits")) |c| if (c == .object) {
+        if (c.object.get("has_credits")) |v| if (v == .bool) {
+            credits_has = v.bool;
+        };
+        if (c.object.get("unlimited")) |v| if (v == .bool) {
+            credits_unlimited = v.bool;
+        };
+        if (c.object.get("balance")) |v| switch (v) {
+            .float => |f| credits_balance = std.fmt.allocPrint(arena, "{d:.2}", .{f}) catch null,
+            .integer => |i| credits_balance = std.fmt.allocPrint(arena, "{d}", .{i}) catch null,
+            .string => |s| credits_balance = arena.dupe(u8, s) catch null,
+            else => {},
+        };
+    };
+
+    if (session_pct == null and weekly_pct == null) return error.NoUsage;
+
+    return CodexProbe{
+        .ok = true,
+        .err = null,
+        .source = "http",
+        .session_pct = session_pct,
+        .session_resets_ms = session_resets_ms,
+        .weekly_pct = weekly_pct,
+        .weekly_resets_ms = weekly_resets_ms,
+        .plan_type = plan_dup,
+        .credits_has = credits_has,
+        .credits_unlimited = credits_unlimited,
+        .credits_balance = credits_balance,
+    };
+}
+
+fn probeCodexRollout(arena: std.mem.Allocator) !CodexProbe {
     const home_cstr = getenv("HOME") orelse return error.NoHome;
     const home = std.mem.span(home_cstr);
     const sessions_root = try std.fmt.allocPrint(arena, "{s}/.codex/sessions", .{home});
 
     const newest = (try findNewestRollout(arena, sessions_root)) orelse return error.NoRollout;
-    const json = try parseLatestTokenCount(arena, newest);
-    return json;
+    return try parseLatestTokenCount(arena, newest);
 }
 
 // libc DIR / dirent —— readdir 走它，避免 std.Io.Dir 拉 io 实例。
@@ -963,6 +1159,7 @@ fn tryParseRateLimits(arena: std.mem.Allocator, line: []const u8) !?CodexProbe {
     return CodexProbe{
         .ok = true,
         .err = null,
+        .source = "jsonl",
         .session_pct = session_pct,
         .session_resets_ms = session_resets_ms,
         .weekly_pct = weekly_pct,
@@ -981,7 +1178,8 @@ fn readUsedPct(obj: std.json.ObjectMap) ?u32 {
 }
 
 fn readResetsMs(obj: std.json.ObjectMap) ?i64 {
-    const v = obj.get("resets_at") orelse return null;
+    // JSONL `resets_at` (plural) vs HTTP `reset_at` (singular) —— 同概念两个名。
+    const v = obj.get("resets_at") orelse obj.get("reset_at") orelse return null;
     const secs: i64 = switch (v) {
         .integer => |i| i,
         .float => |f| @intFromFloat(f),
@@ -1054,12 +1252,23 @@ fn writeCodexJson(buf: *Buf, alloc: std.mem.Allocator, p: CodexProbe) !void {
         try buf.appendSlice(alloc, ",\"error\":");
         try jsonString(buf, alloc, e);
     }
+    try buf.appendSlice(alloc, ",\"source\":");
+    try jsonString(buf, alloc, p.source);
     try buf.appendSlice(alloc, ",\"session\":");
     try writeWindowJson(buf, alloc, p.session_pct, null, p.session_resets_ms);
     try buf.appendSlice(alloc, ",\"weekly\":");
     try writeWindowJson(buf, alloc, p.weekly_pct, null, p.weekly_resets_ms);
     try buf.appendSlice(alloc, ",\"plan_type\":");
     if (p.plan_type) |s| try jsonString(buf, alloc, s) else try buf.appendSlice(alloc, "null");
+    // credits 只 HTTP 路径有；jsonl fallback 全 null。
+    try buf.appendSlice(alloc, ",\"credits\":{");
+    try buf.appendSlice(alloc, "\"has\":");
+    if (p.credits_has) |b| try buf.appendSlice(alloc, if (b) "true" else "false") else try buf.appendSlice(alloc, "null");
+    try buf.appendSlice(alloc, ",\"unlimited\":");
+    if (p.credits_unlimited) |b| try buf.appendSlice(alloc, if (b) "true" else "false") else try buf.appendSlice(alloc, "null");
+    try buf.appendSlice(alloc, ",\"balance\":");
+    if (p.credits_balance) |s| try jsonString(buf, alloc, s) else try buf.appendSlice(alloc, "null");
+    try buf.append(alloc, '}');
     try buf.append(alloc, '}');
 }
 
