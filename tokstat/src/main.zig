@@ -108,6 +108,15 @@ var stdout_mu: pthread_mutex_t = .{};
 var cache_mu: pthread_mutex_t = .{};
 var emitter_started: bool = false;
 
+// Plugin debug log。写 stderr —— daemon 端 stdio_plugin 有 reader thread
+// 实时 drain 转发到 aglet runtime log（前缀 "[plugin:tokstat] "）。`--jsonl`
+// CLI 模式同样能看（直接进终端 stderr）。
+fn tlog(comptime fmt: []const u8, args: anytype) void {
+    var buf: [1024]u8 = undefined;
+    const out = std.fmt.bufPrint(&buf, fmt ++ "\n", args) catch return;
+    _ = write(stderr_fd, out.ptr, out.len);
+}
+
 // Cached last probe result, JSON-encoded so emit + tools/call share one
 // path. `null` until the first probe finishes.
 var cached_json: ?[]u8 = null;
@@ -203,18 +212,24 @@ const Probe = struct {
 };
 
 fn probeClaude(arena: std.mem.Allocator) Probe {
-    return probeClaudeInner(arena) catch |e| .{
-        .ok = false,
-        .err = @errorName(e),
-        .session_pct = null,
-        .session_resets = null,
-        .session_resets_ms = null,
-        .weekly_pct = null,
-        .weekly_resets = null,
-        .weekly_resets_ms = null,
-        .total_cost_usd = null,
-        .raw_panel = null,
+    tlog("claude: probe start", .{});
+    const p = probeClaudeInner(arena) catch |e| {
+        tlog("claude: ERR={s}", .{@errorName(e)});
+        return .{
+            .ok = false,
+            .err = @errorName(e),
+            .session_pct = null,
+            .session_resets = null,
+            .session_resets_ms = null,
+            .weekly_pct = null,
+            .weekly_resets = null,
+            .weekly_resets_ms = null,
+            .total_cost_usd = null,
+            .raw_panel = null,
+        };
     };
+    tlog("claude: ok session={?d}% weekly={?d}%", .{ p.session_pct, p.weekly_pct });
+    return p;
 }
 
 fn findTrustedDir(arena: std.mem.Allocator) ?[:0]const u8 {
@@ -769,17 +784,28 @@ const CodexProbe = struct {
 /// access_token 从 `~/.codex/auth.json`）—— 永远新、不依赖最近有过 codex 调用。
 /// HTTP 失败（401 token 过期 / 网断 / curl 不在）退化到 JSONL rollout 扫描。
 fn probeCodex(arena: std.mem.Allocator) CodexProbe {
-    if (probeCodexHttp(arena)) |p| return p else |_| {}
-    return probeCodexRollout(arena) catch |e| .{
-        .ok = false,
-        .err = @errorName(e),
-        .source = "",
-        .session_pct = null,
-        .session_resets_ms = null,
-        .weekly_pct = null,
-        .weekly_resets_ms = null,
-        .plan_type = null,
+    tlog("codex: probe start (try HTTP first)", .{});
+    if (probeCodexHttp(arena)) |p| {
+        tlog("codex: http ok session={?d}% weekly={?d}% plan={s}", .{ p.session_pct, p.weekly_pct, p.plan_type orelse "-" });
+        return p;
+    } else |e| {
+        tlog("codex: http ERR={s}, fallback JSONL", .{@errorName(e)});
+    }
+    const p = probeCodexRollout(arena) catch |e| {
+        tlog("codex: jsonl ERR={s}", .{@errorName(e)});
+        return .{
+            .ok = false,
+            .err = @errorName(e),
+            .source = "",
+            .session_pct = null,
+            .session_resets_ms = null,
+            .weekly_pct = null,
+            .weekly_resets_ms = null,
+            .plan_type = null,
+        };
     };
+    tlog("codex: jsonl ok session={?d}% weekly={?d}%", .{ p.session_pct, p.weekly_pct });
+    return p;
 }
 
 /// HTTP 路径：curl chatgpt.com/backend-api/wham/usage with Bearer token from
@@ -1501,6 +1527,7 @@ fn runJsonlMode() !void {
 }
 
 pub fn main(init: std.process.Init.Minimal) !void {
+    tlog("=== tokstat start pid={d} ===", .{std.c.getpid()});
     var jsonl_mode = false;
     var once_mode = false;
     var it = init.args.iterate();
