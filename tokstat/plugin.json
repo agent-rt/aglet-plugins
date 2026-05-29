@@ -21,8 +21,7 @@
         "result": [
           { "key": "claude", "type": "object" },
           { "key": "codex", "type": "object" }
-        ],
-        "permission": "exec:fork"
+        ]
       },
       {
         "name": "refresh",
@@ -30,8 +29,7 @@
         "result": [
           { "key": "claude", "type": "object" },
           { "key": "codex", "type": "object" }
-        ],
-        "permission": "exec:fork"
+        ]
       }
     ],
     "backend": {
