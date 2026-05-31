@@ -2,7 +2,7 @@
   "manifest": {
     "id": "sysmon",
     "name": "Sysmon",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "plugin": true,
     "namespace": "sysmon",
     "description": {
@@ -44,6 +44,14 @@
           },
           {
             "key": "gpu",
+            "type": "object"
+          },
+          {
+            "key": "temp",
+            "type": "object"
+          },
+          {
+            "key": "fan",
             "type": "object"
           }
         ],
@@ -157,6 +165,48 @@
           {
             "key": "mem_used_bytes",
             "type": "integer"
+          }
+        ],
+        "permission": "system:read"
+      },
+      {
+        "name": "temp",
+        "params": [],
+        "result": [
+          {
+            "key": "present",
+            "type": "boolean"
+          },
+          {
+            "key": "cpu_c",
+            "type": "number"
+          },
+          {
+            "key": "gpu_c",
+            "type": "number"
+          },
+          {
+            "key": "max_c",
+            "type": "number"
+          }
+        ],
+        "permission": "system:read"
+      },
+      {
+        "name": "fan",
+        "params": [],
+        "result": [
+          {
+            "key": "present",
+            "type": "boolean"
+          },
+          {
+            "key": "count",
+            "type": "integer"
+          },
+          {
+            "key": "rpm",
+            "type": "number"
           }
         ],
         "permission": "system:read"
