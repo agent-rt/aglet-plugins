@@ -3,7 +3,6 @@
     "id": "sysmon",
     "name": "Sysmon",
     "version": "0.3.0",
-    "runtime": "json-ui-react",
     "plugin": true,
     "namespace": "sysmon",
     "description": {
