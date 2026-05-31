@@ -349,6 +349,11 @@ const BatterySample = struct {
     time_remaining_min: i64 = -1, // -1 = 计算中/未知
 };
 const GpuSample = struct { util_pct: f64 = 0, mem_used_bytes: u64 = 0 };
+// 温度（Apple Silicon 走私有 IOHIDEventSystemClient 热传感器；无公开 API）。
+// 多传感器：cpu_c=CPU 类均值，gpu_c=GPU 类均值，max_c=全场最热。无传感器→present=false。
+const TempSample = struct { present: bool = false, cpu_c: f64 = 0, gpu_c: f64 = 0, max_c: f64 = 0 };
+// 风扇（SMC F0Ac/FNum）。无风扇机型（台式/无扇 MacBook）→present=false。
+const FanSample = struct { present: bool = false, count: u32 = 0, rpm: f64 = 0 };
 
 const CFRef = ?*anyopaque;
 const kCFStringEncodingUTF8: u32 = 0x08000100;
@@ -376,6 +381,48 @@ extern "c" fn IOServiceGetMatchingServices(mainPort: c_uint, matching: CFRef, ex
 extern "c" fn IOIteratorNext(iterator: c_uint) c_uint;
 extern "c" fn IORegistryEntryCreateCFProperty(entry: c_uint, key: CFRef, allocator: CFRef, options: u32) CFRef;
 extern "c" fn IOObjectRelease(object: c_uint) c_int;
+
+// CFDictionary/CFNumber builders（建 IOHID matching dict 用）。
+const kCFNumberSInt32Type: c_int = 3;
+extern "c" fn CFNumberCreate(alloc: CFRef, theType: c_int, valuePtr: *const anyopaque) CFRef;
+extern "c" fn CFDictionaryCreate(alloc: CFRef, keys: [*]const ?*const anyopaque, values: [*]const ?*const anyopaque, num: c_long, keyCb: ?*const anyopaque, valCb: ?*const anyopaque) CFRef;
+extern const kCFTypeDictionaryKeyCallBacks: anyopaque;
+extern const kCFTypeDictionaryValueCallBacks: anyopaque;
+
+// ── 温度：私有 IOHIDEventSystemClient 热传感器（Apple Silicon 唯一路子）──────
+// 无公开 API、无头文件；符号在 IOKit.framework 导出，可链。可能随 macOS 升级失效。
+const kIOHIDEventTypeTemperature: i64 = 15;
+// IOHIDEventFieldBase(type) = type << 16
+const kIOHIDEventFieldTemperature: i32 = @intCast(kIOHIDEventTypeTemperature << 16);
+const kHIDPage_AppleVendor: i32 = 0xff00;
+const kHIDUsage_AppleVendor_TemperatureSensor: i32 = 0x0005;
+extern "c" fn IOHIDEventSystemClientCreate(alloc: CFRef) CFRef;
+extern "c" fn IOHIDEventSystemClientSetMatching(client: CFRef, matching: CFRef) void;
+extern "c" fn IOHIDEventSystemClientCopyServices(client: CFRef) CFRef;
+extern "c" fn IOHIDServiceClientCopyProperty(service: CFRef, key: CFRef) CFRef;
+extern "c" fn IOHIDServiceClientCopyEvent(service: CFRef, eventType: i64, options: i64, timestamp: u64) CFRef;
+extern "c" fn IOHIDEventGetFloatValue(event: CFRef, field: i32) f64;
+
+// ── 风扇：SMC（AppleSMC IOConnectCallStructMethod）──────────────────────────
+extern "c" fn IOServiceGetMatchingService(mainPort: c_uint, matching: CFRef) c_uint;
+extern "c" fn IOServiceOpen(service: c_uint, owningTask: c_uint, conn_type: u32, connect: *c_uint) c_int;
+extern "c" fn IOServiceClose(connect: c_uint) c_int;
+extern "c" fn IOConnectCallStructMethod(conn: c_uint, selector: u32, in: *const anyopaque, inCnt: usize, out: *anyopaque, outCnt: *usize) c_int;
+
+const SMCVers = extern struct { major: u8 = 0, minor: u8 = 0, build: u8 = 0, reserved: u8 = 0, release: u16 = 0 };
+const SMCPLimit = extern struct { version: u16 = 0, length: u16 = 0, cpuPLimit: u32 = 0, gpuPLimit: u32 = 0, memPLimit: u32 = 0 };
+const SMCKeyInfo = extern struct { dataSize: u32 = 0, dataType: u32 = 0, dataAttributes: u8 = 0 };
+const SMCKeyData = extern struct {
+    key: u32 = 0,
+    vers: SMCVers = .{},
+    pLimitData: SMCPLimit = .{},
+    keyInfo: SMCKeyInfo = .{},
+    result: u8 = 0,
+    status: u8 = 0,
+    data8: u8 = 0,
+    data32: u32 = 0,
+    bytes: [32]u8 = [_]u8{0} ** 32,
+};
 
 /// dict[key] → f64（CFNumber）。缺/类型不符 → null。
 fn cfDictNum(dict: CFRef, key: [*:0]const u8) ?f64 {
@@ -472,6 +519,151 @@ fn writeGpuJson(buf: *Buf, alloc: std.mem.Allocator, s: GpuSample) !void {
     try buf.print(alloc, ",\"mem_used_bytes\":{d}}}", .{s.mem_used_bytes});
 }
 
+// ── 温度（私有 IOHID 热传感器）─────────────────────────────────────────────
+fn tempSample() TempSample {
+    if (builtin.os.tag != .macos) return .{};
+    const client = IOHIDEventSystemClientCreate(null) orelse return .{};
+    defer CFRelease(client);
+
+    var page: i32 = kHIDPage_AppleVendor;
+    var usage: i32 = kHIDUsage_AppleVendor_TemperatureSensor;
+    const num_page = CFNumberCreate(null, kCFNumberSInt32Type, &page) orelse return .{};
+    defer CFRelease(num_page);
+    const num_usage = CFNumberCreate(null, kCFNumberSInt32Type, &usage) orelse return .{};
+    defer CFRelease(num_usage);
+    const key_page = CFStringCreateWithCString(null, "PrimaryUsagePage", kCFStringEncodingUTF8) orelse return .{};
+    defer CFRelease(key_page);
+    const key_usage = CFStringCreateWithCString(null, "PrimaryUsage", kCFStringEncodingUTF8) orelse return .{};
+    defer CFRelease(key_usage);
+    var keys = [_]?*const anyopaque{ key_page, key_usage };
+    var vals = [_]?*const anyopaque{ num_page, num_usage };
+    const matching = CFDictionaryCreate(null, &keys, &vals, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) orelse return .{};
+    defer CFRelease(matching);
+
+    IOHIDEventSystemClientSetMatching(client, matching);
+    const services = IOHIDEventSystemClientCopyServices(client) orelse return .{};
+    defer CFRelease(services);
+    const n = CFArrayGetCount(services);
+    if (n == 0) return .{};
+
+    const prod_key = CFStringCreateWithCString(null, "Product", kCFStringEncodingUTF8) orelse return .{};
+    defer CFRelease(prod_key);
+
+    var any = false;
+    var max_c: f64 = 0;
+    var cpu_sum: f64 = 0;
+    var cpu_n: f64 = 0;
+    var gpu_sum: f64 = 0;
+    var gpu_n: f64 = 0;
+    var i: c_long = 0;
+    while (i < n) : (i += 1) {
+        const svc = CFArrayGetValueAtIndex(services, i);
+        if (svc == null) continue;
+        const ev = IOHIDServiceClientCopyEvent(svc, kIOHIDEventTypeTemperature, 0, 0) orelse continue;
+        defer CFRelease(ev);
+        const c = IOHIDEventGetFloatValue(ev, kIOHIDEventFieldTemperature);
+        if (c <= 0 or c > 150) continue; // 过滤离谱/无效读数
+        any = true;
+        if (c > max_c) max_c = c;
+        // 按 Product 名字归类 CPU / GPU（Apple Silicon 命名不稳，匹配不到就只进 max）。
+        var name_buf: [128]u8 = undefined;
+        const nm = IOHIDServiceClientCopyProperty(svc, prod_key) orelse continue;
+        defer CFRelease(nm);
+        if (CFGetTypeID(nm) != CFStringGetTypeID()) continue;
+        if (!CFStringGetCString(nm, &name_buf, name_buf.len, kCFStringEncodingUTF8)) continue;
+        const s = std.mem.sliceTo(@as([*:0]u8, @ptrCast(&name_buf)), 0);
+        if (std.mem.indexOf(u8, s, "GPU") != null) {
+            gpu_sum += c;
+            gpu_n += 1;
+        } else if (std.mem.indexOf(u8, s, "CPU") != null or std.mem.indexOf(u8, s, "pACC") != null or
+            std.mem.indexOf(u8, s, "eACC") != null or std.mem.indexOf(u8, s, "SOC") != null)
+        {
+            cpu_sum += c;
+            cpu_n += 1;
+        }
+    }
+    if (!any) return .{};
+    return .{
+        .present = true,
+        .cpu_c = if (cpu_n > 0) cpu_sum / cpu_n else max_c,
+        .gpu_c = if (gpu_n > 0) gpu_sum / gpu_n else 0,
+        .max_c = max_c,
+    };
+}
+
+fn writeTempJson(buf: *Buf, alloc: std.mem.Allocator, s: TempSample) !void {
+    try buf.print(alloc, "{{\"present\":{},\"cpu_c\":", .{s.present});
+    try jsonNumber(buf, alloc, s.cpu_c);
+    try buf.appendSlice(alloc, ",\"gpu_c\":");
+    try jsonNumber(buf, alloc, s.gpu_c);
+    try buf.appendSlice(alloc, ",\"max_c\":");
+    try jsonNumber(buf, alloc, s.max_c);
+    try buf.append(alloc, '}');
+}
+
+// ── 风扇（SMC）─────────────────────────────────────────────────────────────
+fn smcKey(s: []const u8) u32 {
+    return (@as(u32, s[0]) << 24) | (@as(u32, s[1]) << 16) | (@as(u32, s[2]) << 8) | @as(u32, s[3]);
+}
+
+/// 读一个 SMC key：先 getKeyInfo 拿 dataSize/dataType，再 readKey 拿 bytes。
+/// 返回 dataSize（写入 out_bytes/out_type）；失败→null。
+fn smcRead(conn: c_uint, key: u32, out_bytes: *[32]u8, out_type: *u32) ?u32 {
+    var in: SMCKeyData = .{ .key = key, .data8 = 9 }; // kSMCGetKeyInfo
+    var out: SMCKeyData = .{};
+    var sz: usize = @sizeOf(SMCKeyData);
+    if (IOConnectCallStructMethod(conn, 2, &in, @sizeOf(SMCKeyData), &out, &sz) != 0 or out.result != 0) return null;
+    const data_size = out.keyInfo.dataSize;
+    out_type.* = out.keyInfo.dataType;
+
+    in = .{ .key = key, .data8 = 5, .keyInfo = .{ .dataSize = data_size, .dataType = out.keyInfo.dataType } }; // kSMCReadKey
+    sz = @sizeOf(SMCKeyData);
+    if (IOConnectCallStructMethod(conn, 2, &in, @sizeOf(SMCKeyData), &out, &sz) != 0 or out.result != 0) return null;
+    out_bytes.* = out.bytes;
+    return data_size;
+}
+
+fn decodeSmcFloat(b: []const u8, dtype: u32) f64 {
+    if (dtype == smcKey("flt ") and b.len >= 4) {
+        const bits = @as(u32, b[0]) | (@as(u32, b[1]) << 8) | (@as(u32, b[2]) << 16) | (@as(u32, b[3]) << 24);
+        return @floatCast(@as(f32, @bitCast(bits)));
+    }
+    if (dtype == smcKey("fpe2") and b.len >= 2) {
+        const v = (@as(u16, b[0]) << 8) | @as(u16, b[1]);
+        return @floatFromInt(v >> 2);
+    }
+    if (b.len >= 2) {
+        const v = (@as(u16, b[0]) << 8) | @as(u16, b[1]);
+        return @floatFromInt(v);
+    }
+    return 0;
+}
+
+fn fanSample() FanSample {
+    if (builtin.os.tag != .macos) return .{};
+    const matching = IOServiceMatching("AppleSMC") orelse return .{};
+    const svc = IOServiceGetMatchingService(0, matching); // 消费 matching
+    if (svc == 0) return .{};
+    defer _ = IOObjectRelease(svc);
+    var conn: c_uint = 0;
+    if (IOServiceOpen(svc, mach_task_self(), 0, &conn) != 0) return .{};
+    defer _ = IOServiceClose(conn);
+
+    var bytes: [32]u8 = undefined;
+    var dtype: u32 = 0;
+    _ = smcRead(conn, smcKey("FNum"), &bytes, &dtype) orelse return .{};
+    const count: u32 = bytes[0];
+    if (count == 0) return .{}; // 无风扇机型
+    const sz = smcRead(conn, smcKey("F0Ac"), &bytes, &dtype) orelse return .{ .present = true, .count = count, .rpm = 0 };
+    return .{ .present = true, .count = count, .rpm = decodeSmcFloat(bytes[0..sz], dtype) };
+}
+
+fn writeFanJson(buf: *Buf, alloc: std.mem.Allocator, s: FanSample) !void {
+    try buf.print(alloc, "{{\"present\":{},\"count\":{d},\"rpm\":", .{ s.present, s.count });
+    try jsonNumber(buf, alloc, s.rpm);
+    try buf.append(alloc, '}');
+}
+
 // Build the inner JSON value (cpu/memory/disk or snapshot envelope) into
 // the arena buffer. Caller wraps with MCP envelope.
 fn buildToolResult(
@@ -492,6 +684,10 @@ fn buildToolResult(
         try writeBatteryJson(&out, arena, batterySample());
         try out.appendSlice(arena, ",\"gpu\":");
         try writeGpuJson(&out, arena, gpuSample());
+        try out.appendSlice(arena, ",\"temp\":");
+        try writeTempJson(&out, arena, tempSample());
+        try out.appendSlice(arena, ",\"fan\":");
+        try writeFanJson(&out, arena, fanSample());
         try out.append(arena, '}');
     } else if (std.mem.eql(u8, tool, "sysmon.cpu")) {
         try writeCpuJson(&out, arena, cpuSample());
@@ -503,6 +699,10 @@ fn buildToolResult(
         try writeBatteryJson(&out, arena, batterySample());
     } else if (std.mem.eql(u8, tool, "sysmon.gpu")) {
         try writeGpuJson(&out, arena, gpuSample());
+    } else if (std.mem.eql(u8, tool, "sysmon.temp")) {
+        try writeTempJson(&out, arena, tempSample());
+    } else if (std.mem.eql(u8, tool, "sysmon.fan")) {
+        try writeFanJson(&out, arena, fanSample());
     } else {
         return error.UnknownTool;
     }
