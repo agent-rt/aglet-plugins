@@ -130,11 +130,30 @@ fn addZigPlugin(b: *std.Build, id: []const u8) *std.Build.Step {
     return step;
 }
 
-/// Build `<id>/src/main.zig` as a native executable under `<id>/dist/<id>`.
-/// Built for the host target (no cross-compile) — stdio plugins are spawned
-/// as subprocesses by the host runtime, so they run on the user's OS/arch
-/// directly. Links libc so platform-specific syscalls (Mach API on macOS,
-/// /proc reads on Linux) can use extern "c" bindings.
+/// Canonical `<os>-<arch>` target token — MUST match aglet core
+/// `src/core/plugin_target.zig` (pack/install/loader use the same vocab).
+fn targetString(b: *std.Build, t: std.Target) []const u8 {
+    const os = switch (t.os.tag) {
+        .macos => "darwin",
+        .windows => "windows",
+        .linux => "linux",
+        else => "unknown",
+    };
+    const arch = switch (t.cpu.arch) {
+        .aarch64 => "arm64",
+        .x86_64 => "x86_64",
+        else => "unknown",
+    };
+    return b.fmt("{s}-{s}", .{ os, arch });
+}
+
+/// Build `<id>/src/main.zig` as a native executable under
+/// `<id>/dist/<id>-<os>-<arch>`. stdio plugins are per-platform native binaries
+/// spawned as subprocesses; the `.aplugin` carries one per declared target and
+/// the host picks the matching one (see aglet docs/STDIO_PLUGIN_SPEC.md +
+/// PLUGINS.md). Built for the host target (no cross-compile here — CI on each
+/// runner OS produces its target's binary; future: a build matrix). Links libc
+/// for platform syscalls (Mach API on macOS, /proc on Linux).
 fn addStdioNativePlugin(b: *std.Build, id: []const u8) *std.Build.Step {
     const target = b.graph.host;
     const mod = b.createModule(.{
@@ -154,11 +173,15 @@ fn addStdioNativePlugin(b: *std.Build, id: []const u8) *std.Build.Step {
         mod.linkFramework("CoreFoundation", .{});
     }
 
+    // dist/<id>-<os>-<arch> —— per-target naming so multiple platforms coexist
+    // in one .aplugin. aplugin.json backend.path is the base `dist/<id>`.
+    const tname = b.fmt("{s}-{s}", .{ id, targetString(b, target.result) });
     const install = b.addInstallArtifact(exe, .{
         .dest_dir = .{ .override = .{ .custom = b.fmt("../{s}/dist", .{id}) } },
+        .dest_sub_path = tname,
     });
 
-    const step = b.step(id, b.fmt("Build {s}/dist/{s} (native stdio plugin)", .{ id, id }));
+    const step = b.step(id, b.fmt("Build {s}/dist/{s} (native stdio plugin)", .{ id, tname }));
     step.dependOn(&install.step);
     return step;
 }
