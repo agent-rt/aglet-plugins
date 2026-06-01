@@ -215,6 +215,7 @@
     "backend": {
       "kind": "stdio",
       "path": "dist/sysmon",
+      "targets": ["darwin-arm64"],
       "capabilities": [
         "fs:read:/proc",
         "fs:read:/sys",

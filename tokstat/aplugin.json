@@ -34,6 +34,7 @@
     "backend": {
       "kind": "stdio",
       "path": "dist/tokstat",
+      "targets": ["darwin-arm64"],
       "capabilities": [
         "exec:fork",
         "fs:read:any",
