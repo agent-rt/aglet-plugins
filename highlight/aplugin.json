@@ -2,13 +2,13 @@
   "manifest": {
     "id": "highlight",
     "name": "Syntax Highlight",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "plugin": true,
     "namespace": "highlight",
     "description": {
-      "default": "Syntax highlighting via tree-sitter — code → class-tagged HTML spans.",
-      "zh": "tree-sitter 语法高亮：代码 → 带 class 的 HTML span。",
-      "ja": "tree-sitter による構文ハイライト：コード → class 付き HTML span。"
+      "default": "Syntax highlighting via tree-sitter — code → IR rich-text runs (renderer-agnostic).",
+      "zh": "tree-sitter 语法高亮：代码 → IR rich-text runs（跨端渲染器无关）。",
+      "ja": "tree-sitter による構文ハイライト：コード → IR rich-text runs（レンダラー非依存）。"
     },
     "keywords": ["highlight", "syntax", "code", "tree-sitter"],
     "license": "MIT",
@@ -20,7 +20,7 @@
           { "key": "code", "type": "string" },
           { "key": "lang", "type": "string" }
         ],
-        "result": [{ "key": "html", "type": "string" }],
+        "result": [{ "key": "runs", "type": "array" }],
         "permission": "highlight:render"
       }
     ],
