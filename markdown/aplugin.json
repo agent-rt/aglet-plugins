@@ -1,0 +1,40 @@
+{
+  "manifest": {
+    "id": "markdown",
+    "name": "Markdown",
+    "version": "0.1.0",
+    "plugin": true,
+    "namespace": "markdown",
+    "actions": [
+      {
+        "name": "render",
+        "params": [
+          {
+            "key": "text",
+            "type": "string"
+          }
+        ],
+        "result": [
+          {
+            "key": "html",
+            "type": "string"
+          }
+        ],
+        "permission": "markdown:render"
+      }
+    ],
+    "backend": {
+      "kind": "wasm",
+      "path": "dist/markdown.wasm",
+      "wasi_imports": [
+        "env.emscripten_notify_memory_growth",
+        "wasi_snapshot_preview1.fd_close",
+        "wasi_snapshot_preview1.fd_write",
+        "wasi_snapshot_preview1.fd_seek"
+      ]
+    }
+  },
+  "ui": {
+    "type": "Page"
+  }
+}
