@@ -81,7 +81,7 @@ shipping plugin.
 ```
 sdk/
 ├── README.md              # this file
-├── plugin.schema.json     # JSON Schema for aplugin.json (draft 2020-12)
+├── aplugin.schema.json    # JSON Schema for aplugin.json (draft 2020-12)
 ├── zig/
 │   └── plugin.zig         # Zig SDK — Params / Result / runDispatch / exportRuntime
 ├── c/
@@ -94,22 +94,21 @@ sdk/
 
 ## Validating aplugin.json
 
-`plugin.schema.json` is a JSON Schema (draft 2020-12) covering the canonical
+`aplugin.schema.json` is a JSON Schema (draft 2020-12) covering the canonical
 manifest shape. Editors that understand JSON Schema (VS Code, JetBrains, etc.)
 can pick it up via a `$schema` reference:
 
 ```json
 {
-  "$schema": "../sdk/plugin.schema.json",
+  "$schema": "../sdk/aplugin.schema.json",
   "manifest": { ... }
 }
 ```
 
-Or validate from CI:
+Or validate from CI (ajv via bun — repo 用 bun，不用 Python）:
 
 ```bash
-python3 -m pip install jsonschema
-python3 -c "import json,jsonschema; jsonschema.validate(json.load(open('aplugin.json')), json.load(open('../sdk/plugin.schema.json')))"
+bunx ajv-cli validate -s ../sdk/aplugin.schema.json -d aplugin.json --spec=draft2020
 ```
 
 The Aglet runtime applies stricter validation at install time (cross-checking
