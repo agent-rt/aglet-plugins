@@ -81,7 +81,6 @@ shipping plugin.
 ```
 sdk/
 ├── README.md              # this file
-├── aplugin.schema.json    # JSON Schema for aplugin.json (draft 2020-12)
 ├── zig/
 │   └── plugin.zig         # Zig SDK — Params / Result / runDispatch / exportRuntime
 ├── c/
@@ -94,26 +93,18 @@ sdk/
 
 ## Validating aplugin.json
 
-`aplugin.schema.json` is a JSON Schema (draft 2020-12) covering the canonical
-manifest shape. Editors that understand JSON Schema (VS Code, JetBrains, etc.)
-can pick it up via a `$schema` reference:
-
-```json
-{
-  "$schema": "../sdk/aplugin.schema.json",
-  "manifest": { ... }
-}
-```
-
-Or validate from CI (ajv via bun — repo 用 bun，不用 Python）:
+The canonical manifest contract lives in the Aglet CLI (`spec.zig`-driven),
+so validate with the `aglet` binary — same gate CI and `install` use, no
+separate JSON Schema to drift out of sync:
 
 ```bash
-bunx ajv-cli validate -s ../sdk/aplugin.schema.json -d aplugin.json --spec=draft2020
+aglet plugin publish aplugin.json --dry-run --no-git --no-push --no-pr
 ```
 
-The Aglet runtime applies stricter validation at install time (cross-checking
-permissions, namespace uniqueness, etc.). This schema is the lighter-weight
-check that catches structural mistakes before you build.
+This parses + validates the manifest (id / version / namespace / actions /
+backend kind+capabilities), packs the artifact, and reports any structural
+or cross-field mistakes before you build. `aglet schema` dumps the machine
+contract (component / action / permission tables) if you need it programmatically.
 
 ## Build integration
 
